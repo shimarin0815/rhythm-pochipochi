@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>リズムポチポチ｜1ファイル・タイミングゲーム</title>
+  <meta name="description" content="円が縮んでくる“ど真ん中”でポチ！Perfect/Good/Bad の判定でスコアを競う、単一HTMLのミニゲーム。" />
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --panel: #121824;
+      --text: #e9f1ff;
+      --muted:#9fb1c8;
+      --accent:#6cc6ff;
+      --ok:#8af5c8;
+      --good:#ffd36b;
+      --bad:#ff6b8a;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:20px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; color:var(--text); background:
+        radial-gradient(1400px 900px at 10% -10%, #1a2432 0%, transparent 60%),
+        radial-gradient(1200px 800px at 120% 0%, #1d2736 0%, transparent 60%),
+        var(--bg);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      display:grid; place-items:center;
+    }
+    .wrap{ width:min(980px, 94vw); padding:20px }
+    .grid{ display:grid; grid-template-columns:1fr; gap:18px }
+    @media(min-width:880px){ .grid{ grid-template-columns: 1.2fr .8fr } }
+
+    .stage{ position:relative; background:linear-gradient(180deg, rgba(255,255,255,.04), transparent), var(--panel); border:1px solid rgba(255,255,255,.06); border-radius:24px; box-shadow:var(--shadow); }
+    canvas{ width:100%; height:auto; display:block; border-radius:24px }
+
+    .hud{ position:absolute; inset:0; display:grid; place-items:center; pointer-events:none }
+    .count{ font: 900 clamp(40px, 10vw, 120px)/1.1 ui-sans-serif; letter-spacing:.02em; text-shadow:0 8px 24px rgba(0,0,0,.35); opacity:.95 }
+
+    .card{ background:linear-gradient(180deg, rgba(255,255,255,.04), transparent), var(--panel); border:1px solid rgba(255,255,255,.06); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px }
+
+    h1{ margin:0 0 6px; font-size: clamp(18px, 3.5vw, 32px) }
+    .sub{ color:var(--muted); margin:0 0 14px; font-size:14px }
+
+    .score{ font: 700 clamp(28px, 6vw, 46px)/1 monospace }
+    .score small{ font: 400 13px/1 ui-sans-serif; color:var(--muted) }
+
+    .meter{ height: 12px; border-radius:999px; background:#0f141b; border:1px solid rgba(255,255,255,.08); overflow:hidden }
+    .meter>span{ display:block; height:100%; width:0%; background:linear-gradient(90deg, var(--ok), var(--good)); transition: width .2s ease }
+
+    .row{ display:grid; grid-template-columns: 1fr 1fr; gap:12px }
+    .btn{ appearance:none; border:none; border-radius:14px; padding:14px 16px; font-weight:800; cursor:pointer; color:white; background:linear-gradient(180deg, #3b70ff, #2844ff); box-shadow:0 10px 24px rgba(40,68,255,.32); transition: transform .06s ease, filter .15s ease }
+    .btn:active{ transform: translateY(1px) }
+    .btn.secondary{ background:linear-gradient(180deg, #2b3447, #1b2231); color:#d7e2f6; box-shadow:none; border:1px solid rgba(255,255,255,.08) }
+    .btn.ghost{ background:transparent; color:#cfe3ff; border:1px dashed rgba(255,255,255,.25); box-shadow:none }
+
+    .kpi{ display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-top:8px }
+    .kpi .item{ background:#0f141b; border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 12px; text-align:center }
+    .kpi .item b{ font: 800 20px/1 monospace }
+    .kpi .item span{ display:block; color:var(--muted); font-size:12px }
+
+    .judge{ height:36px; display:grid; place-items:center; font-weight:900; letter-spacing:.04em; }
+    .judge .label{ padding:6px 12px; border-radius:999px; }
+    .judge .perfect{ background:linear-gradient(90deg, #76ffd1, #b6ffea); color:#0b1318 }
+    .judge .good{ background:linear-gradient(90deg, #ffe28e, #fff0bf); color:#17130a }
+    .judge .bad{ background:linear-gradient(90deg, #ff9bb2, #ffc1ce); color:#16070c }
+
+    .footer{ margin-top:10px; color:var(--muted); font-size:12px }
+
+    /* tiny toast */
+    .toast{ position: fixed; left:50%; bottom:24px; transform: translateX(-50%); background:#0e141d; padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px; color:#dfeaff; opacity:0; pointer-events:none; transition: opacity .2s ease }
+    .toast.show{ opacity:1 }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>リズムポチポチ <small style="color:var(--muted); font-weight:500">— 円が“ど真ん中”でポチ！</small></h1>
+    <p class="sub">30秒チャレンジ。円が縮んで中心のターゲットリングと重なる瞬間に、クリック/タップ か <kbd>Space</kbd>/<kbd>Enter</kbd> を押してね。Perfect/Good/Bad で採点。</p>
+
+    <div class="grid">
+      <section class="stage">
+        <canvas id="cvs" width="600" height="600" aria-label="リズムポチポチのステージ"></canvas>
+        <div class="hud" aria-live="polite"><div class="count" id="count"></div></div>
+      </section>
+
+      <aside class="card" role="group" aria-label="スコアと操作">
+        <div class="score" id="score">0 <small>pts</small></div>
+        <div class="meter" aria-hidden="true" style="margin:10px 0 12px"><span id="timebar"></span></div>
+        <div class="judge" id="judge"></div>
+
+        <div class="kpi">
+          <div class="item"><b id="combo">0</b><span>Combo</span></div>
+          <div class="item"><b id="best">0</b><span>Best</span></div>
+          <div class="item"><b id="speed">1.0x</b><span>Speed</span></div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <button class="btn" id="btnStart" type="button">スタート</button>
+          <button class="btn secondary" id="btnHit" type="button" aria-label="今すぐポチ" title="今すぐポチ(スペース/エンター)">今すぐポチ</button>
+          <button class="btn ghost" id="btnShare" type="button">結果をシェア</button>
+          <button class="btn secondary" id="btnSpeed" type="button">スピード変更</button>
+        </div>
+        <div class="footer">Perfect +100 / Good +60 / Bad +0 ・ 1ビートに1回だけ判定されます。</div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    // ====== Helpers ======
+    const $ = s=>document.querySelector(s);
+    const clamp = (n,min,max)=>Math.max(min, Math.min(max,n));
+    const lerp = (a,b,t)=>a+(b-a)*t;
+    function showToast(msg){ const el=$('#toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 1200); }
+
+    // robust clipboard (https or localhost -> navigator.clipboard / else: textarea fallback)
+    function copyText(text){
+      const isSecure = (location.protocol === 'https:' || location.hostname === 'localhost');
+      if(navigator.clipboard && isSecure){ return navigator.clipboard.writeText(text); }
+      return new Promise((resolve)=>{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta); resolve(); });
+    }
+
+    // ====== Canvas Setup (HiDPI) ======
+    const cvs = $('#cvs'); const ctx = cvs.getContext('2d');
+    function fitCanvas(){
+      const dpr = Math.max(1, window.devicePixelRatio||1);
+      const rect = cvs.getBoundingClientRect();
+      cvs.width = Math.round(rect.width * dpr);
+      cvs.height = Math.round(rect.width * dpr); // square
+      ctx.setTransform(dpr,0,0,dpr,0,0); // scale drawing ops
+    }
+    window.addEventListener('resize', fitCanvas);
+    fitCanvas();
+
+    // ====== Game State ======
+    const DURATION_MS_DEFAULT = 30000; // 30s
+    const SPEEDS = [0.9, 1.0, 1.2, 1.5]; // animation speed multipliers
+    let speedIdx = 1;
+
+    const state = {
+      running:false,
+      start:0,
+      duration:DURATION_MS_DEFAULT,
+      beatMs: 1000, // 1 beat = 1s (before speed)
+      lastBeatHit: -1,
+      score:0, combo:0, bestCombo:0,
+      perfect:0, good:0, bad:0,
+      bestScore: Number(localStorage.getItem('rhythmpp_best')||0)
+    };
+
+    // ====== Geometry ======
+    function stageSize(){ const s = Math.min(cvs.width, cvs.height); return s; }
+    function center(){ return {x: cvs.width/2, y: cvs.height/2}; }
+
+    function radii(){
+      const S = stageSize();
+      const Rstart = S*0.45; // start radius (big)
+      const Rtarget = S*0.15; // target ring radius
+      return {Rstart, Rtarget};
+    }
+
+    // ====== Draw ======
+    function drawBackground(){
+      const {x,y} = center();
+      const {Rstart,Rtarget} = radii();
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      const g = ctx.createRadialGradient(x,y, Rstart*0.2, x,y, Rstart*1.2);
+      g.addColorStop(0,'#0d1420'); g.addColorStop(1,'#0a0f15');
+      ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
+
+      ctx.save();
+      ctx.globalAlpha = .18; ctx.strokeStyle = '#cfe3ff';
+      [Rtarget*0.5, Rtarget, Rtarget*1.6].forEach(r=>{ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); });
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = '#9ee7ff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x,y,Rtarget,0,Math.PI*2); ctx.stroke();
+      ctx.globalAlpha=.35; ctx.lineWidth=16; ctx.strokeStyle='#6cc6ff'; ctx.beginPath(); ctx.arc(x,y,Rtarget,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawShrinkingCircle(radius){
+      const {x,y} = center();
+      const g = ctx.createRadialGradient(x,y, radius*0.1, x,y, radius);
+      g.addColorStop(0,'rgba(255,255,255,.9)');
+      g.addColorStop(1,'rgba(108,198,255,.35)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y, radius, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,.8)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.stroke();
+    }
+
+    // burst effect
+    const bursts=[];
+    function addBurst(kind){ bursts.push({t0:performance.now(), kind}); }
+    function drawBursts(now){
+      const {x,y}=center();
+      for(let i=bursts.length-1;i>=0;i--){
+        const b = bursts[i]; const t = (now-b.t0)/500; // 0..1
+        if(t>1){ bursts.splice(i,1); continue; }
+        ctx.save();
+        if(b.kind==='perfect'){
+          ctx.globalAlpha = 1-t; ctx.strokeStyle = '#8af5c8'; ctx.lineWidth = 3;
+          const r = radii().Rtarget * lerp(1, 1.6, t);
+          ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+        } else if(b.kind==='good'){
+          ctx.globalAlpha = .7*(1-t); ctx.strokeStyle = '#ffd36b'; ctx.lineWidth = 2;
+          const r = radii().Rtarget * lerp(0.9, 1.4, t);
+          ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+
+    // ====== Timing ======
+    function currentBeat(now){
+      const ms = (now - state.start);
+      const beatMs = state.beatMs / SPEEDS[speedIdx];
+      return { index: Math.floor(ms/beatMs), within: ms % beatMs, beatMs };
+    }
+
+    function currentRadius(beat){
+      const {Rstart} = radii();
+      const t = clamp(beat.within / beat.beatMs, 0, 1); // 0..1
+      const r = lerp(Rstart, 0, t); // shrink to center
+      return r;
+    }
+
+    // ====== Judge ======
+    function judge(now){
+      if(!state.running) return;
+      const beat = currentBeat(now||performance.now());
+      if(beat.index === state.lastBeatHit) return; // once per beat
+      const r = currentRadius(beat);
+      const target = radii().Rtarget;
+      const diff = Math.abs(r - target);
+      const TH_PERF = radii().Rtarget * 0.06; // ~±6%
+      const TH_GOOD = radii().Rtarget * 0.16; // ~±16%
+      let label, cls;
+      if(diff <= TH_PERF){
+        label='PERFECT'; cls='perfect';
+        state.score += 100; state.combo++; state.bestCombo = Math.max(state.bestCombo, state.combo); state.perfect++;
+        addBurst('perfect');
+      } else if(diff <= TH_GOOD){
+        label='GOOD'; cls='good';
+        state.score += 60; state.combo++; state.bestCombo = Math.max(state.bestCombo, state.combo); state.good++;
+        addBurst('good');
+      } else {
+        label='BAD'; cls='bad';
+        state.combo = 0; state.bad++;
+      }
+      state.lastBeatHit = beat.index;
+      flashJudge(label, cls);
+      updateHUD();
+    }
+
+    function flashJudge(text, cls){
+      const el = $('#judge');
+      el.innerHTML = `<div class="label ${cls}">${text}</div>`;
+      el.style.transform = 'translateY(0) scale(1)';
+      el.style.opacity = '1';
+      setTimeout(()=>{ el.style.opacity='0.0'; el.style.transform='translateY(-4px) scale(.98)'; }, 320);
+    }
+
+    // ====== Loop ======
+    function tick(now){
+      if(!state.running) return;
+      drawBackground();
+      const beat = currentBeat(now);
+      drawShrinkingCircle( currentRadius(beat) );
+      drawBursts(now);
+      const remain = 1 - clamp((now - state.start)/state.duration, 0, 1);
+      $('#timebar').style.width = `${remain*100}%`;
+      if(now >= state.start + state.duration){ finish(); return; }
+      requestAnimationFrame(tick);
+    }
+
+    function startGame(){
+      state.running = true;
+      state.start = performance.now();
+      state.lastBeatHit = -1; state.score=0; state.combo=0; state.bestCombo=0;
+      state.perfect=0; state.good=0; state.bad=0;
+      $('#judge').innerHTML=''; $('#timebar').style.width='100%';
+      updateHUD();
+      requestAnimationFrame(tick);
+    }
+
+    function finish(){
+      state.running=false;
+      drawBackground();
+      const {x,y}=center();
+      ctx.fillStyle='rgba(255,255,255,.06)'; ctx.beginPath(); ctx.arc(x,y, radii().Rtarget*1.8, 0, Math.PI*2); ctx.fill();
+      if(state.score > state.bestScore){ state.bestScore = state.score; localStorage.setItem('rhythmpp_best', String(state.bestScore)); }
+      updateHUD();
+      const msg = `終了！ ${state.score} pts — P:${state.perfect} / G:${state.good} / B:${state.bad}`;
+      showToast(msg);
+      $('#count').textContent = 'END';
+      setTimeout(()=>$('#count').textContent='', 900);
+    }
+
+    function updateHUD(){
+      $('#score').innerHTML = `${state.score} <small>pts</small>`;
+      $('#combo').textContent = state.combo;
+      $('#best').textContent = state.bestScore;
+      $('#speed').textContent = `${SPEEDS[speedIdx].toFixed(1)}x`;
+    }
+
+    // ====== Controls ======
+    function countInAndStart(){
+      const el = $('#count');
+      const seq = ['3','2','1','GO'];
+      let i=0; el.style.opacity='1';
+      function step(){
+        if(i<seq.length){ el.textContent = seq[i++]; setTimeout(step, i<seq.length? 520: 420); }
+        else{ el.textContent=''; startGame(); }
+      }
+      step();
+    }
+
+    $('#btnStart').addEventListener('click', ()=>{ countInAndStart(); });
+    $('#btnHit').addEventListener('click', ()=>judge());
+    document.addEventListener('keydown', e=>{ if(e.code==='Space'||e.key==='Enter'){ e.preventDefault(); judge(); } });
+
+    $('#btnSpeed').addEventListener('click', ()=>{
+      speedIdx = (speedIdx+1)%SPEEDS.length;
+      showToast(`スピード: ${SPEEDS[speedIdx].toFixed(1)}x`);
+      updateHUD();
+    });
+
+    // === Share (robust) ===
+    $('#btnShare').addEventListener('click', async ()=>{
+      const isSecure = (location.protocol === 'https:' || location.hostname === 'localhost');
+      const url = isSecure ? location.href : '';
+      const text = `リズムポチポチ — ${state.score}pts (P:${state.perfect}/G:${state.good}/B:${state.bad})
+#リズムポチポチ #Webゲーム #1ファイル`;
+      const shareData = url ? { text, url } : { text };
+      try{
+        if(navigator.canShare && navigator.canShare(shareData)){
+          await navigator.share(shareData); return;
+        }
+        if(navigator.share){ await navigator.share(shareData); return; }
+      }catch(e){ /* ignore and fallback */ }
+      try{ await copyText(`${text}${url? `
+${url}`:''}`); showToast('シェア文をコピーしました'); }catch(e){}
+      openTwitterIntent(text, url);
+    });
+
+    function openTwitterIntent(text, url){
+      const t = encodeURIComponent(text);
+      const u = url ? `&url=${encodeURIComponent(url)}` : '';
+      window.open(`https://twitter.com/intent/tweet?text=${t}${u}`, '_blank');
+    }
+
+    // initial paint
+    drawBackground();
+  </script>
+</body>
+</html>
